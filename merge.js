@@ -1,75 +1,94 @@
 const fs = require("fs");
+const path = require("path");
 const readline = require("readline");
 
-// Fungsi untuk mendapatkan versi terbaru dari dua dependency
-function getLatestVersion(version1, version2) {
-    if (!version1) return version2;
-    if (!version2) return version1;
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+});
+
+let files = [];
+
+function askForFile(index) {
+  console.log(`\n⚡ Silakan drag & drop file JSON ke-${index}, lalu tekan Enter...`);
+
+  rl.once("line", (filePath) => {
+    filePath = filePath.trim().replace(/^"|"$/g, ""); // Bersihkan tanda kutip
+
+    if (validateJsonFile(filePath)) {
+      files.push(filePath);
+
+      if (files.length < 2) {
+        askForFile(2); // Minta file kedua setelah file pertama valid
+      } else {
+        mergeFiles(); // Langsung merge setelah file kedua valid
+      }
+    } else {
+      askForFile(index); // Minta ulang jika tidak valid
+    }
+  });
+}
+
+function validateJsonFile(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) throw new Error("❌ File tidak ditemukan!");
+    if (path.extname(filePath) !== ".json") throw new Error("❌ File harus berformat JSON!");
+
+    const jsonData = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    if (!jsonData.dependencies && !jsonData.devDependencies) {
+      throw new Error("❌ File tidak memiliki dependencies atau devDependencies!");
+    }
+
+    console.log("✅ File valid!");
+    return true;
+  } catch (error) {
+    console.log(error.message);
+    return false;
+  }
+}
+
+function mergeFiles() {
+  console.log("\n🔄 Sedang menggabungkan file...\n");
+
+  const oldPackage = JSON.parse(fs.readFileSync(files[0], "utf8"));
+  const newPackage = JSON.parse(fs.readFileSync(files[1], "utf8"));
+
+  oldPackage.dependencies = { ...oldPackage.dependencies, ...newPackage.dependencies };
+  oldPackage.devDependencies = { ...oldPackage.devDependencies, ...newPackage.devDependencies };
+
+  // Hapus `devDependencies` jika kosong
+  if (Object.keys(oldPackage.devDependencies).length === 0) {
+    delete oldPackage.devDependencies;
+  }
+
+  const outputFolder = "./output";
+  const outputFile = path.join(outputFolder, "package.json");
+
+  if (!fs.existsSync(outputFolder)) {
+    fs.mkdirSync(outputFolder);
+  }
+
+  showProgress(() => {
+    fs.writeFileSync(outputFile, JSON.stringify(oldPackage, null, 2));
+    console.log(`✅ File berhasil digabung! Cek hasilnya di: ${outputFile}`);
+    rl.close();
+  });
+}
+
+function showProgress(callback) {
+  let progress = 0;
+  const interval = setInterval(() => {
+    progress += 10;
+    const bar = "█".repeat(progress / 5) + "-".repeat(20 - progress / 5);
+    process.stdout.write(`\r🔄 Proses merge: [${bar}] ${progress}%`);
     
-    // Bandingkan versi secara semantik
-    const semver = require("semver");
-    return semver.gt(semver.coerce(version1), semver.coerce(version2)) ? version1 : version2;
-}
-
-// Fungsi untuk membaca file JSON
-function readJsonFile(prompt) {
-    return new Promise((resolve, reject) => {
-        const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout
-        });
-
-        rl.question(`${prompt} (Drag & Drop file, lalu tekan Enter): `, (filePath) => {
-            filePath = filePath.trim().replace(/^"(.*)"$/, "$1"); // Bersihkan path dari quotes
-            try {
-                const jsonData = JSON.parse(fs.readFileSync(filePath, "utf8"));
-                console.log(`✅ File valid: ${filePath}\n`);
-                resolve(jsonData);
-            } catch (error) {
-                console.error(`❌ Error membaca file: ${error.message}`);
-                reject(error);
-            } finally {
-                rl.close();
-            }
-        });
-    });
-}
-
-// Fungsi untuk menggabungkan dependencies dengan memilih versi terbaru
-function mergeDependencies(oldDeps, newDeps) {
-    const merged = { ...oldDeps };
-
-    for (const [pkg, version] of Object.entries(newDeps)) {
-        merged[pkg] = getLatestVersion(merged[pkg], version);
+    if (progress >= 100) {
+      clearInterval(interval);
+      console.log("\n✅ Merge selesai!\n");
+      callback();
     }
-
-    return merged;
+  }, 200);
 }
 
-(async () => {
-    try {
-        const oldPackage = await readJsonFile("Masukkan file package.json pertama");
-        const newPackage = await readJsonFile("Masukkan file package.json kedua");
-
-        // Proses merge dependencies dan devDependencies dengan memilih versi terbaru
-        const mergedPackage = {
-            ...oldPackage,
-            dependencies: mergeDependencies(oldPackage.dependencies || {}, newPackage.dependencies || {}),
-            devDependencies: mergeDependencies(oldPackage.devDependencies || {}, newPackage.devDependencies || {})
-        };
-
-        // Hapus devDependencies jika kosong
-        if (Object.keys(mergedPackage.devDependencies).length === 0) {
-            delete mergedPackage.devDependencies;
-        }
-
-        // Simpan ke output/package.json
-        const outputPath = "output/package.json";
-        fs.mkdirSync("output", { recursive: true });
-        fs.writeFileSync(outputPath, JSON.stringify(mergedPackage, null, 2));
-
-        console.log(`\n✅ Merge selesai! File tersimpan di: ${outputPath}`);
-    } catch (error) {
-        console.error("❌ Proses merge gagal:", error.message);
-    }
-})();
+// Mulai dengan meminta file pertama
+askForFile(1);
