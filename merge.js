@@ -53,11 +53,33 @@ function mergeFiles() {
   const oldPackage = JSON.parse(fs.readFileSync(files[0], "utf8"));
   const newPackage = JSON.parse(fs.readFileSync(files[1], "utf8"));
 
-  oldPackage.dependencies = { ...oldPackage.dependencies, ...newPackage.dependencies };
-  oldPackage.devDependencies = { ...oldPackage.devDependencies, ...newPackage.devDependencies };
+  function mergeDependencies(oldDeps = {}, newDeps = {}) {
+    const merged = { ...oldDeps };
+
+    for (const [key, newVersion] of Object.entries(newDeps)) {
+      if (merged[key]) {
+        const oldVersion = merged[key];
+        merged[key] = compareVersions(oldVersion, newVersion);
+      } else {
+        merged[key] = newVersion;
+      }
+    }
+
+    return merged;
+  }
+
+  function compareVersions(v1, v2) {
+    const cleanV1 = v1.replace(/[^\d.]/g, "");
+    const cleanV2 = v2.replace(/[^\d.]/g, "");
+
+    return cleanV1 > cleanV2 ? v1 : v2;
+  }
+
+  oldPackage.dependencies = mergeDependencies(oldPackage.dependencies, newPackage.dependencies);
+  oldPackage.devDependencies = mergeDependencies(oldPackage.devDependencies, newPackage.devDependencies);
 
   // Hapus `devDependencies` jika kosong
-  if (Object.keys(oldPackage.devDependencies).length === 0) {
+  if (Object.keys(oldPackage.devDependencies || {}).length === 0) {
     delete oldPackage.devDependencies;
   }
 
@@ -81,7 +103,7 @@ function showProgress(callback) {
     progress += 10;
     const bar = "█".repeat(progress / 5) + "-".repeat(20 - progress / 5);
     process.stdout.write(`\r🔄 Proses merge: [${bar}] ${progress}%`);
-    
+
     if (progress >= 100) {
       clearInterval(interval);
       console.log("\n✅ Merge selesai!\n");
